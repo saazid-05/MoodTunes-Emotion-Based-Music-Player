@@ -1,0 +1,99 @@
+"""Music playback engine using pygame."""
+
+import pygame
+import os
+import threading
+
+
+class MusicPlayer:
+    def __init__(self, on_track_change=None):
+        """
+        Args:
+            on_track_change: callback(song_name: str)
+        """
+        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+        pygame.mixer.music.set_volume(1.0)
+        self.playlist: list[str] = []
+        self.current_index = 0
+        self.playing = False
+        self.paused = False
+        self.on_track_change = on_track_change
+        self._monitor_thread = None
+        self._running = False
+
+    def load_playlist(self, songs: list[str]):
+        """Load a new playlist and start playing from the first track."""
+        if not songs:
+            return
+        self.playlist = songs
+        self.current_index = 0
+        self._play_current()
+
+    def _play_current(self):
+        if not self.playlist:
+            return
+        song = self.playlist[self.current_index]
+        if not os.path.exists(song):
+            self.next()
+            return
+        pygame.mixer.music.load(song)
+        pygame.mixer.music.play()
+        self.playing = True
+        self.paused = False
+        if self.on_track_change:
+            self.on_track_change(os.path.basename(song))
+        self._start_monitor()
+
+    def _start_monitor(self):
+        """Background thread that auto-advances to next track."""
+        self._running = True
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            return
+        self._monitor_thread = threading.Thread(target=self._monitor, daemon=True)
+        self._monitor_thread.start()
+
+    def _monitor(self):
+        while self._running:
+            if self.playing and not self.paused:
+                if not pygame.mixer.music.get_busy():
+                    self.next()
+            pygame.time.wait(500)
+
+    def play_pause(self):
+        if not self.playing:
+            return
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+        else:
+            pygame.mixer.music.pause()
+            self.paused = True
+
+    def next(self):
+        if not self.playlist:
+            return
+        self.current_index = (self.current_index + 1) % len(self.playlist)
+        self._play_current()
+
+    def previous(self):
+        if not self.playlist:
+            return
+        self.current_index = (self.current_index - 1) % len(self.playlist)
+        self._play_current()
+
+    def set_volume(self, volume: float):
+        """volume: 0.0 to 1.0"""
+        pygame.mixer.music.set_volume(max(0.0, min(1.0, volume)))
+
+    def stop(self):
+        self._running = False
+        pygame.mixer.music.stop()
+        self.playing = False
+
+    def current_song(self) -> str:
+        if self.playlist:
+            return os.path.basename(self.playlist[self.current_index])
+        return "No song loaded"
+
+    def is_paused(self) -> bool:
+        return self.paused
